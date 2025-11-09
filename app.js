@@ -191,8 +191,8 @@ function applyTheme(mode) {
 
 function initTheme() {
   const saved = localStorage.getItem('theme');
-  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const mode = saved || (prefersDark ? 'dark' : 'light');
+  // Default to light unless the user explicitly chose otherwise
+  const mode = saved ? saved : 'light';
   applyTheme(mode);
 }
 
@@ -570,8 +570,8 @@ function init() {
   attachNav();
   attachFilters();
   attachCheckoutForm();
-  // Open catalog directly
-  setView('catalog');
+  // Open homepage by default
+  setView('home');
   renderProducts();
   attachProductGridDelegation();
   renderFavorites();
