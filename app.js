@@ -23,12 +23,19 @@ const CREATOR_PATRONYMIC = "Abdullayevich";
 const state = {
   products: [],
   favorites: new Set(JSON.parse(localStorage.getItem("favorites") || "[]")),
-  cart: new Map(JSON.parse(localStorage.getItem("cart") || "[]")), // id -> {product, qty}
-  filters: { q: "", category: "all", sort: "default" },
+  cart: new Map(JSON.parse(localStorage.getItem("cart") || "[]")), // id -> {product, qty, size, color}
+  compare: new Set(JSON.parse(localStorage.getItem("compare") || "[]")),
+  recentlyViewed: JSON.parse(localStorage.getItem("recentlyViewed") || "[]"),
+  reviews: new Map(JSON.parse(localStorage.getItem("reviews") || "[]")), // productId -> [{name, rating, text, date}]
+  orders: JSON.parse(localStorage.getItem("orders") || "[]"),
+  newsletter: JSON.parse(localStorage.getItem("newsletter") || "[]"),
+  filters: { q: "", category: "all", sort: "default", priceMax: 500000 },
   promo: null,
   shipping: { method: "standard" },
   page: { size: 12, shown: 12 },
-  galleryRendered: false
+  galleryRendered: false,
+  currentProduct: null,
+  selectedVariants: {} // {productId: {size: 'M', color: 'Qizil'}}
 };
 
 // Utilities
@@ -156,7 +163,13 @@ function buildProducts() {
         category: cat,
         price: cfg.price + i * 5000,
         img: imgUrl,
-        desc: makeDesc(name, cat, imgUrl)
+        desc: makeDesc(name, cat, imgUrl),
+        sizes: ["S", "M", "L", "XL"],
+        colors: ["Qora", "Oq", "Ko'k", "Qizil"],
+        inStock: Math.random() > 0.2,
+        stockCount: Math.floor(Math.random() * 50) + 10,
+        tags: [cat, i % 2 === 0 ? "Yangi" : "Mashhur", i % 3 === 0 ? "Chegirma" : ""].filter(Boolean),
+        createdAt: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString()
       });
     }
   });
@@ -177,30 +190,49 @@ function attachProductGridDelegation() {
   });
 }
 
-// Theme management
+// Theme management - simplified and made more reliable
 function applyTheme(mode) {
   const root = document.documentElement;
+  
+  // Always set the theme attribute directly
   if (mode === 'dark') {
     root.setAttribute('data-theme', 'dark');
   } else {
     root.removeAttribute('data-theme');
   }
-  const themeBtn = document.getElementById('theme-toggle');
-  if (themeBtn) themeBtn.textContent = mode === 'dark' ? '☀️' : '🌙';
+  
+  // Save to localStorage for persistence
+  localStorage.setItem('theme', mode);
+  
+  // Update theme toggles in the settings modal if it exists
+  const themeOptions = document.querySelectorAll('.theme-option');
+  themeOptions.forEach(option => {
+    if (option.dataset.theme === mode) {
+      option.classList.add('active');
+    } else {
+      option.classList.remove('active');
+    }
+  });
 }
 
 function initTheme() {
-  const saved = localStorage.getItem('theme');
-  // Default to light unless the user explicitly chose otherwise
-  const mode = saved ? saved : 'light';
-  applyTheme(mode);
+  // Theme is now managed by settings.js, but we keep this for backward compatibility
+  const saved = localStorage.getItem('theme') || 'light';
+  applyTheme(saved);
 }
 
+// Theme toggle is now only available through settings
 function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   const next = current === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('theme', next);
-  applyTheme(next);
+  
+  // Use the settings module if available
+  if (window.Settings && typeof window.Settings.setTheme === 'function') {
+    window.Settings.setTheme(next);
+  } else {
+    // Fallback to direct theme application if settings module is not available
+    applyTheme(next);
+  }
 }
 
 const PRODUCT_DATA = buildProducts();
@@ -212,35 +244,71 @@ function setView(view) {
   $$(".view").forEach(v => v.classList.remove("view--active"));
   const target = $(`.view[data-view="${view}"]`);
   if (target) target.classList.add("view--active");
+  
+  // Handle view-specific rendering
   if (view === 'home' && !state.galleryRendered) {
     renderGallery();
+    // Mahsulotlar faqat Mahsulotlar bo'limida ko'rsatiladi
+  } else if (view === 'catalog') {
+    // Reset pagination when entering catalog
+    state.page.shown = state.page.size;
+    renderProducts();
+  } else if (view === 'favorites') {
+    renderFavorites();
+  } else if (view === 'cart') {
+    renderCart();
+  } else if (view === 'compare') {
+    renderCompare();
+  } else if (view === 'orders') {
+    renderOrders();
   }
 }
 
 // Render products
 function renderProducts() {
   const grid = $("#product-grid");
+  if (!grid) return;
   grid.innerHTML = "";
+  
+  // Ensure products are loaded
+  if (!state.products || state.products.length === 0) {
+    state.products = [...PRODUCT_DATA];
+  }
+  
   let items = state.products.filter(p =>
     (state.filters.category === "all" || p.category === state.filters.category) &&
-    (state.filters.q === "" || p.name.toLowerCase().includes(state.filters.q))
+    (state.filters.q === "" || p.name.toLowerCase().includes(state.filters.q.toLowerCase())) &&
+    p.price <= (state.filters.priceMax || 500000)
   );
+  
   switch (state.filters.sort) {
     case "price-asc": items.sort((a,b)=>a.price-b.price); break;
     case "price-desc": items.sort((a,b)=>b.price-a.price); break;
     case "name-asc": items.sort((a,b)=>a.name.localeCompare(b.name)); break;
     case "name-desc": items.sort((a,b)=>b.name.localeCompare(a.name)); break;
+    case "rating-desc": items.sort((a,b)=>getProductRating(b.id)-getProductRating(a.id)); break;
+    case "newest": items.sort((a,b)=>new Date(b.createdAt || 0)-new Date(a.createdAt || 0)); break;
   }
+  
   const limit = state.page.shown;
   const visible = items.slice(0, limit);
   const frag = document.createDocumentFragment();
   visible.forEach((p, idx) => frag.appendChild(productCard(p, idx)));
   grid.appendChild(frag);
+  
   const loadMore = document.getElementById('load-more');
   if (loadMore) {
     const hasMore = items.length > limit;
     loadMore.style.display = hasMore ? '' : 'none';
-    loadMore.onclick = () => { state.page.shown += state.page.size; renderProducts(); };
+    loadMore.onclick = () => { 
+      state.page.shown += state.page.size; 
+      renderProducts(); 
+    };
+  }
+  
+  // Show message if no products found
+  if (items.length === 0) {
+    grid.innerHTML = '<div class="card" style="padding:40px; text-align:center; color:var(--muted);">Mahsulotlar topilmadi. Filtrlarni o\'zgartiring.</div>';
   }
 }
 
@@ -248,33 +316,79 @@ function productCard(product, idx=0) {
   const card = document.createElement("div");
   card.className = "card";
   card.style.setProperty('--i', String(idx));
+  const rating = getProductRating(product.id);
+  const reviewCount = getReviewCount(product.id);
+  const isInCompare = state.compare.has(product.id);
+  const isNew = new Date(product.createdAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   card.innerHTML = `
     <div class="card__media">
       <img loading=\"lazy\" decoding=\"async\" sizes=\"(max-width: 600px) 50vw, 25vw\" src=\"${product.img}\" alt=\"${product.name}\">
       <button class="card__fav" aria-label="Sevimlilarga qo'shish" data-id="${product.id}">❤</button>
+      ${isNew ? '<span class="card__badge card__badge--new">Yangi</span>' : ''}
     </div>
     <div class="card__body">
       <div class="card__title">${product.name}</div>
-      <div class="card__meta"><span class="muted">${product.category}</span><span class="price">${formatPrice(product.price)}</span></div>
+      <div class="card__meta">
+        <span class="muted">${product.category}</span>
+        <span class="price">${formatPrice(product.price)}</span>
+      </div>
+      <div class="card__rating">
+        <span class="stars">${renderStars(rating)}</span>
+        <span class="rating-count">(${reviewCount})</span>
+      </div>
+      ${product.tags && product.tags.length > 0 ? `<div class="card__tags">${product.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>` : ''}
       <div class="card__actions">
-        <button type="button" class="btn btn--primary add-cart" data-id="${product.id}">Savatga solish</button>
+        <button type="button" class="btn btn--primary add-cart" data-id="${product.id}" ${!product.inStock ? 'disabled' : ''}>Savatga solish</button>
         <button type="button" class="btn add-fav" data-id="${product.id}">Sevimli</button>
+        <button type="button" class="btn quick-view" data-id="${product.id}">Tezkor ko'rish</button>
       </div>
     </div>`;
 
   const favBtn = card.querySelector(".card__fav");
   const addFavBtn = card.querySelector(".add-fav");
   const addCartBtn = card.querySelector(".add-cart");
+  const quickViewBtn = card.querySelector(".quick-view");
   const imgEl = card.querySelector("img");
   attachImgFallback(imgEl);
-  card.querySelector('.card__media').addEventListener('click', () => openProductModal(product));
+  card.querySelector('.card__media').addEventListener('click', () => { addToRecentlyViewed(product.id); openProductModal(product); });
+  
   const updateFavUI = () => {
     const isFav = state.favorites.has(product.id);
     favBtn.textContent = isFav ? "💜" : "❤";
   };
+  
+  // Check if product is in cart
+  const isInCart = Array.from(state.cart.values()).some(item => item.product.id === product.id);
+  
+  if (isInCart) {
+    // Change button to "Savatdan olish"
+    addCartBtn.textContent = "Savatdan olish";
+    addCartBtn.classList.remove('btn--primary');
+    addCartBtn.classList.add('btn--danger');
+    addCartBtn.addEventListener("click", (e) => { 
+      e.preventDefault(); 
+      e.stopPropagation(); 
+      // Find and remove from cart
+      for (const [key, value] of state.cart.entries()) {
+        if (value.product.id === product.id) {
+          removeFromCart(key);
+          break;
+        }
+      }
+    });
+  } else {
+    addCartBtn.addEventListener("click", (e) => { 
+      e.preventDefault(); 
+      e.stopPropagation(); 
+      addToCart(product.id); 
+    });
+  }
+  
   favBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(product.id, true); });
   addFavBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleFavorite(product.id, true); });
-  addCartBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); addToCart(product.id); });
+  if (quickViewBtn) {
+    quickViewBtn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); addToRecentlyViewed(product.id); openProductModal(product); });
+  }
   updateFavUI();
   return card;
 }
@@ -307,35 +421,78 @@ function renderFavorites() {
 }
 
 // Cart
-function addToCart(id) {
+function addToCart(id, size = null, color = null) {
   try { console.debug('[cart] addToCart clicked', id); } catch(_) {}
   const product = state.products.find(p => p.id === id);
   if (!product) return;
-  const current = state.cart.get(id);
-  const qty = current ? current.qty + 1 : 1;
-  state.cart.set(id, { product, qty });
+  
+  // Get selected variants or use defaults
+  const variant = state.selectedVariants[id] || { size: size || product.sizes?.[0] || 'M', color: color || product.colors?.[0] || 'Qora' };
+  
+  // Create unique cart key with variants
+  const cartKey = `${id}_${variant.size}_${variant.color}`;
+  
+  // Check if exact variant already exists
+  let found = false;
+  for (const [key, value] of state.cart.entries()) {
+    if (value.product.id === id && value.size === variant.size && value.color === variant.color) {
+      value.qty += 1;
+      state.cart.set(key, value);
+      found = true;
+      break;
+    }
+  }
+  
+  if (!found) {
+    state.cart.set(cartKey, { 
+      product, 
+      qty: 1, 
+      size: variant.size, 
+      color: variant.color 
+    });
+  }
+  
   persistCart();
   renderCart();
   updateCartCount();
-  toast("Savatga qo'shildi");
+  // Re-render products to update "Savatdan olish" button
+  if (document.querySelector('.view--active[data-view="catalog"]')) {
+    renderProducts();
+  }
+  if (document.querySelector('.view--active[data-view="favorites"]')) {
+    renderFavorites();
+  }
+  toast(`Savatga qo'shildi (${variant.size}, ${variant.color})`);
 }
 
-function changeQty(id, delta) {
-  const row = state.cart.get(id);
+function changeQty(cartKey, delta) {
+  const row = state.cart.get(cartKey);
   if (!row) return;
   const next = Math.max(1, row.qty + delta);
+  if (next === 0) {
+    removeFromCart(cartKey);
+    return;
+  }
   row.qty = next;
-  state.cart.set(id, row);
+  state.cart.set(cartKey, row);
   persistCart();
   renderCart();
   updateCartCount();
 }
 
-function removeFromCart(id) {
-  state.cart.delete(id);
+function removeFromCart(cartKey) {
+  state.cart.delete(cartKey);
   persistCart();
   renderCart();
   updateCartCount();
+  // Re-render products to update "Savatga solish" button
+  if (document.querySelector('.view--active[data-view="catalog"]')) {
+    renderProducts();
+  }
+  if (document.querySelector('.view--active[data-view="favorites"]')) {
+    renderFavorites();
+  }
+  toast("Savatdan olib tashlandi");
 }
 
 function persistCart() {
@@ -379,21 +536,23 @@ function updateCartSummaryUI() {
 
 function renderCart() {
   const list = $("#cart-list");
+  if (!list) return;
   list.innerHTML = "";
   if (state.cart.size === 0) {
-    list.innerHTML = `<div class="card" style="padding:16px;">Savat bo'sh. Katalogdan mahsulot qo'shing.</div>`;
-    renderCartProductsGrid([]);
+    list.innerHTML = `<div class="card" style="padding:16px; text-align:center;">Savat bo'sh. Katalogdan mahsulot qo'shing.</div>`;
   } else {
-    state.cart.forEach(({ product, qty }) => {
+    state.cart.forEach(({ product, qty, size, color }, cartKey) => {
       const row = document.createElement("div");
       row.className = "cart-item";
+      const variantInfo = size || color ? `<div class="muted" style="font-size:12px; margin-top:4px;">O'lcham: ${size || 'N/A'}, Rang: ${color || 'N/A'}</div>` : '';
       row.innerHTML = `
         <img loading="lazy" decoding="async" src="${product.img}" alt="${product.name}">
         <div>
           <div style="font-weight:700;">${product.name}</div>
           <div class="muted">${formatPrice(product.price)}</div>
+          ${variantInfo}
         </div>
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <div class="qty">
             <button aria-label="Kamaytirish">−</button>
             <span>${qty}</span>
@@ -403,16 +562,22 @@ function renderCart() {
         </div>`;
       const img = row.querySelector('img');
       attachImgFallback(img);
+      
+      // Apply color filter to image if color is selected
+      if (color) {
+        updateProductImageColor(img, color);
+      }
+      
       const [decBtn, incBtn] = row.querySelectorAll(".qty button");
       const delBtn = row.querySelector(".btn");
-      if (decBtn) decBtn.addEventListener("click", () => changeQty(product.id, -1));
-      if (incBtn) incBtn.addEventListener("click", () => changeQty(product.id, +1));
-      if (delBtn) delBtn.addEventListener("click", () => removeFromCart(product.id));
+      if (decBtn) decBtn.addEventListener("click", () => changeQty(cartKey, -1));
+      if (incBtn) incBtn.addEventListener("click", () => changeQty(cartKey, +1));
+      if (delBtn) delBtn.addEventListener("click", () => removeFromCart(cartKey));
       list.appendChild(row);
     });
-    renderCartProductsGrid(Array.from(state.cart.values()).map(v => v.product));
   }
-  $("#cart-total").textContent = formatPrice(cartTotal());
+  const totalEl = $("#cart-total");
+  if (totalEl) totalEl.textContent = formatPrice(cartTotal());
   updateCartSummaryUI();
 }
 
@@ -471,25 +636,18 @@ function attachFilters() {
 
 // Navigation
 function attachNav() {
-  $$("[data-view]").forEach(el => {
-    el.addEventListener("click", (e) => {
-      const view = el.getAttribute("data-view");
-      if (view && el.tagName !== "A") setView(view);
-    });
-  });
-  $$(".footer__links a").forEach(a => {
-    a.addEventListener("click", (e) => {
+  const navLinks = document.querySelectorAll('.nav__link[data-view]');
+  navLinks.forEach(link => {
+    link.addEventListener('click', (e) => {
+      const view = link.getAttribute('data-view');
+      if (view === 'settings') {
+        // Settings toggle is handled by settings.js - don't prevent default
+        return;
+      }
       e.preventDefault();
-      const view = a.getAttribute("data-view");
       setView(view);
     });
   });
-  $("#go-checkout").addEventListener("click", () => {
-    setView("cart");
-    $("#checkout").scrollIntoView({ behavior: "smooth" });
-  });
-  const themeBtn = document.getElementById('theme-toggle');
-  if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 }
 
 // Global delegation as a safety net for dynamic elements
@@ -536,7 +694,17 @@ function attachCheckoutForm() {
     const subtotal = cartTotal();
     const { shipping, eta, discount } = computeShippingAndDiscount(subtotal);
     const total = Math.max(0, subtotal + shipping - discount);
-    const order = { id: orderId, status: 'Qabul qilindi', total, date: new Date().toISOString() };
+    const order = { 
+      id: orderId, 
+      status: 'Qabul qilindi', 
+      total, 
+      date: new Date().toISOString(),
+      items: Array.from(state.cart.entries()).map(([id, {product, qty}]) => ({
+        id, name: product.name, price: product.price, qty
+      }))
+    };
+    state.orders.push(order);
+    localStorage.setItem('orders', JSON.stringify(state.orders));
     localStorage.setItem('lastOrder', JSON.stringify(order));
     toast(`Rahmat, ${data.ism}! Buyurtma #${orderId} qabul qilindi.`);
     state.cart.clear();
@@ -565,36 +733,98 @@ function attachCheckoutForm() {
 
 // Init
 function init() {
-  $("#year").textContent = String(new Date().getFullYear());
-  document.title = `${CREATOR_FULL} | Kiyim Do'koni`;
-  attachNav();
-  attachFilters();
-  attachCheckoutForm();
-  // Open homepage by default
-  setView('home');
-  renderProducts();
-  attachProductGridDelegation();
-  renderFavorites();
-  renderCart();
-  updateCartCount();
-  updateCartSummaryUI();
-  // author photo fallback
-  const authorPhoto = $("#author-photo");
-  if (authorPhoto) attachImgFallback(authorPhoto);
-  const brandPhoto = $("#brand-photo");
-  if (brandPhoto) attachImgFallback(brandPhoto);
-  // Load persisted uploaded photo
-  const saved = localStorage.getItem('authorPhotoData');
-  if (saved) {
-    if (authorPhoto) authorPhoto.src = saved;
-    if (brandPhoto) brandPhoto.src = saved;
-  } else {
-    setAuthorPhotoFromAssets(["assets/oppa uzim.jpg","assets/oppa uzim.jpeg","assets/oppa uzim.png","assets/oppa uzim.webp"]);
+  // Ensure products are loaded first
+  if (!state.products || state.products.length === 0) {
+    state.products = [...PRODUCT_DATA];
   }
+  
+  // Set theme first before anything renders
+  const savedTheme = localStorage.getItem('theme') || 'light';
+  applyTheme(savedTheme);
+  
+  // Initialize settings
+  if (window.Settings && typeof window.Settings.initSettings === 'function') {
+    window.Settings.initSettings();
+  }
+  
+  // Set current year in footer
+  const yearElement = document.getElementById('year');
+  if (yearElement) {
+    yearElement.textContent = new Date().getFullYear();
+  }
+  
+  document.title = `${CREATOR_FULL} | Kiyim Do'koni`;
+  
+  // Initialize core functionality
+  attachNav();
+  attachProductGridDelegation();
+  attachCheckoutForm();
   attachPhotoUploader();
-
-  // Initialize theme from storage or prefers-color-scheme
-  initTheme();
+  attachFilters();
+  attachPriceFilter();
+  
+  // Initialize reviews from localStorage
+  if (localStorage.getItem('reviews')) {
+    const reviewsData = JSON.parse(localStorage.getItem('reviews'));
+    state.reviews = new Map(reviewsData);
+  }
+  
+  // Newsletter form
+  const newsletterForm = document.getElementById('newsletter-form');
+  if (newsletterForm) {
+    newsletterForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('newsletter-email').value;
+      if (!state.newsletter.includes(email)) {
+        state.newsletter.push(email);
+        localStorage.setItem('newsletter', JSON.stringify(state.newsletter));
+        toast("Obuna bo'ldingiz! Rahmat!");
+        closeNewsletterModal();
+      } else {
+        toast("Bu email allaqachon ro'yxatdan o'tgan");
+      }
+    });
+  }
+  
+  // Initialize newsletter modal
+  initNewsletterModal();
+  
+  // Show newsletter modal after 5 seconds (first visit only)
+  if (!localStorage.getItem('newsletterShown')) {
+    setTimeout(() => {
+      const modal = document.getElementById('newsletter-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        localStorage.setItem('newsletterShown', 'true');
+      }
+    }, 5000);
+  }
+  
+  // Set initial view based on URL hash or default to home
+  const hash = window.location.hash.replace('#', '');
+  const validViews = ['home', 'catalog', 'favorites', 'author', 'cart', 'compare', 'orders', 'settings'];
+  const initialView = validViews.includes(hash) ? hash : 'home';
+  
+  // Set the view and render appropriate content
+  setView(initialView);
+  
+  // Update cart count and compare count
+  updateCartCount();
+  updateCompareCount();
+  
+  // Set author photo from available assets
+  setAuthorPhotoFromAssets([
+    'assets/oppa uzim.jpg',
+    'assets/author.jpg',
+    'assets/profile.jpg',
+    'assets/abdulhay.jpg'
+  ]);
+  
+  // Make functions globally available
+  window.closeReviewModal = closeReviewModal;
+  window.closeNewsletterModal = closeNewsletterModal;
+  window.printOrder = printOrder;
 }
 
 document.addEventListener("DOMContentLoaded", init);
@@ -671,6 +901,7 @@ function renderGallery() {
 function openProductModal(product) {
   const modal = document.getElementById('product-modal');
   if (!modal) return;
+  state.currentProduct = product;
   const img = document.getElementById('modal-img');
   const title = document.getElementById('modal-title');
   const cat = document.getElementById('modal-category');
@@ -678,14 +909,124 @@ function openProductModal(product) {
   const price = document.getElementById('modal-price');
   const addCart = document.getElementById('modal-add-cart');
   const addFav = document.getElementById('modal-add-fav');
+  const compareBtn = document.getElementById('modal-compare');
+  const shareBtn = document.getElementById('modal-share');
+  const variantsDiv = document.getElementById('modal-variants');
+  const sizeOptions = document.getElementById('size-options');
+  const colorOptions = document.getElementById('color-options');
+  
   img.src = product.img; attachImgFallback(img);
   title.textContent = product.name;
   cat.textContent = product.category;
   desc.textContent = product.desc || '';
   price.textContent = formatPrice(product.price);
-  addCart.onclick = () => addToCart(product.id);
+  
+  // Rating display
+  const rating = getProductRating(product.id);
+  const reviewCount = getReviewCount(product.id);
+  const modalStars = document.getElementById('modal-stars');
+  const modalRatingText = document.getElementById('modal-rating-text');
+  if (modalStars) modalStars.innerHTML = renderStars(rating);
+  if (modalRatingText) modalRatingText.textContent = `Reyting: ${rating.toFixed(1)} (${reviewCount} sharh)`;
+  
+  // Reviews section
+  renderProductReviews(product.id);
+  
+  // Variants
+  if (variantsDiv && product.sizes && product.colors) {
+    variantsDiv.style.display = 'block';
+    
+    // Initialize selected variants for this product
+    if (!state.selectedVariants[product.id]) {
+      state.selectedVariants[product.id] = {
+        size: product.sizes[0] || 'M',
+        color: product.colors[0] || 'Qora'
+      };
+    }
+    
+    const selected = state.selectedVariants[product.id];
+    
+    if (sizeOptions) {
+      sizeOptions.innerHTML = product.sizes.map(s => {
+        const isSelected = selected.size === s;
+        return `<button class="variant-btn ${isSelected ? 'variant-btn--selected' : ''}" data-size="${s}">${s}</button>`;
+      }).join('');
+      
+      // Add click handlers for size buttons
+      sizeOptions.querySelectorAll('.variant-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const size = btn.getAttribute('data-size');
+          state.selectedVariants[product.id].size = size;
+          
+          // Update UI
+          sizeOptions.querySelectorAll('.variant-btn').forEach(b => b.classList.remove('variant-btn--selected'));
+          btn.classList.add('variant-btn--selected');
+        });
+      });
+    }
+    
+    if (colorOptions) {
+      colorOptions.innerHTML = product.colors.map(c => {
+        const isSelected = selected.color === c;
+        const colorValue = getColorValue(c);
+        return `<div class="color-option-wrapper">
+          <button class="variant-btn variant-btn--color ${isSelected ? 'variant-btn--selected' : ''}" data-color="${c}" style="background: ${colorValue}; border: 2px solid ${isSelected ? '#6a4af0' : 'transparent'}" title="${c}"></button>
+          <span class="color-label">${c}</span>
+        </div>`;
+      }).join('');
+      
+      // Add click handlers for color buttons
+      colorOptions.querySelectorAll('.variant-btn--color').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const color = btn.getAttribute('data-color');
+          state.selectedVariants[product.id].color = color;
+          
+          // Update image with color filter
+          updateProductImageColor(img, color);
+          
+          // Update UI
+          colorOptions.querySelectorAll('.variant-btn--color').forEach(b => {
+            b.classList.remove('variant-btn--selected');
+            b.style.border = '2px solid transparent';
+          });
+          btn.classList.add('variant-btn--selected');
+          btn.style.border = '2px solid #6a4af0';
+        });
+      });
+      
+      // Set initial color filter
+      updateProductImageColor(img, selected.color);
+    }
+  }
+  
+  addCart.onclick = () => {
+    const variant = state.selectedVariants[product.id] || { size: product.sizes?.[0] || 'M', color: product.colors?.[0] || 'Qora' };
+    addToCart(product.id, variant.size, variant.color);
+  };
   addFav.onclick = () => toggleFavorite(product.id, true);
+  if (compareBtn) compareBtn.onclick = () => toggleCompare(product.id);
+  if (shareBtn) shareBtn.onclick = () => shareProduct(product);
   modal.classList.add('modal--open');
+}
+
+// Update product image color with CSS filter
+function updateProductImageColor(img, color) {
+  if (!img) return;
+  
+  const colorFilters = {
+    'Qora': 'brightness(0.3) saturate(1.2)',
+    'Oq': 'brightness(1.5) saturate(0.8)',
+    "Ko'k": 'hue-rotate(200deg) saturate(1.3)',
+    'Qizil': 'hue-rotate(0deg) saturate(1.5) brightness(1.1)',
+    'Yashil': 'hue-rotate(120deg) saturate(1.3)',
+    'Sariq': 'hue-rotate(50deg) saturate(1.4) brightness(1.2)'
+  };
+  
+  const filter = colorFilters[color] || '';
+  img.style.filter = filter;
+  img.style.transition = 'filter 0.3s ease';
 }
 
 function closeModal() {
@@ -711,6 +1052,394 @@ function setAuthorPhotoFromAssets(candidates) {
     testImg.src = url;
   };
   tryNext(0);
+}
+
+// Compare functionality
+function toggleCompare(id) {
+  if (state.compare.has(id)) {
+    state.compare.delete(id);
+    toast("Solishtirishdan olib tashlandi");
+  } else {
+    if (state.compare.size >= 4) {
+      toast("Maksimal 4 ta mahsulotni solishtirish mumkin");
+      return;
+    }
+    state.compare.add(id);
+    toast("Solishtirishga qo'shildi");
+  }
+  localStorage.setItem("compare", JSON.stringify(Array.from(state.compare)));
+  updateCompareCount();
+  renderProducts();
+}
+
+function updateCompareCount() {
+  const countEl = document.getElementById('compare-count');
+  if (countEl) countEl.textContent = String(state.compare.size);
+}
+
+function renderCompare() {
+  const grid = document.getElementById('compare-grid');
+  const empty = document.getElementById('compare-empty');
+  if (!grid) return;
+  
+  if (state.compare.size < 2) {
+    grid.style.display = 'none';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  
+  grid.style.display = 'grid';
+  if (empty) empty.style.display = 'none';
+  grid.innerHTML = '';
+  
+  const products = Array.from(state.compare).map(id => state.products.find(p => p.id === id)).filter(Boolean);
+  const frag = document.createDocumentFragment();
+  
+  products.forEach(product => {
+    const card = document.createElement('div');
+    card.className = 'compare-card';
+    const rating = getProductRating(product.id);
+    card.innerHTML = `
+      <button class="compare-remove" data-id="${product.id}" title="Solishtirishdan olib tashlash">×</button>
+      <img src="${product.img}" alt="${product.name}">
+      <h3>${product.name}</h3>
+      <div class="compare-price">${formatPrice(product.price)}</div>
+      <div class="compare-rating">${renderStars(rating)}</div>
+      <div class="compare-category">${product.category}</div>
+      <div class="compare-stock">${product.inStock ? 'Mavjud' : 'Mavjud emas'}</div>
+      <div class="compare-sizes">O'lchamlar: ${product.sizes?.join(', ') || 'N/A'}</div>
+      <button class="btn btn--primary compare-add-cart" data-id="${product.id}">Savatga solish</button>
+      <button class="btn btn--danger compare-remove-btn" data-id="${product.id}">Solishtirishdan olib tashlash</button>
+    `;
+    const img = card.querySelector('img');
+    attachImgFallback(img);
+    
+    // Remove button (X)
+    card.querySelector('.compare-remove').onclick = () => toggleCompare(product.id);
+    
+    // Remove from compare button
+    const removeBtn = card.querySelector('.compare-remove-btn');
+    if (removeBtn) {
+      removeBtn.onclick = () => toggleCompare(product.id);
+    }
+    
+    // Add to cart button
+    const addCartBtn = card.querySelector('.compare-add-cart');
+    if (addCartBtn) {
+      addCartBtn.onclick = () => {
+        const variant = state.selectedVariants[product.id] || { size: product.sizes?.[0] || 'M', color: product.colors?.[0] || 'Qora' };
+        addToCart(product.id, variant.size, variant.color);
+      };
+    }
+    
+    frag.appendChild(card);
+  });
+  
+  grid.appendChild(frag);
+}
+
+// Recently viewed
+function addToRecentlyViewed(id) {
+  if (!state.recentlyViewed.includes(id)) {
+    state.recentlyViewed.unshift(id);
+    state.recentlyViewed = state.recentlyViewed.slice(0, 10);
+    localStorage.setItem("recentlyViewed", JSON.stringify(state.recentlyViewed));
+  }
+}
+
+function renderRecentlyViewed() {
+  const grid = document.getElementById('recently-viewed-grid');
+  const section = document.getElementById('recently-viewed');
+  if (!grid || !section) return;
+  
+  if (state.recentlyViewed.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  
+  section.style.display = 'block';
+  grid.innerHTML = '';
+  const products = state.recentlyViewed.map(id => state.products.find(p => p.id === id)).filter(Boolean).slice(0, 8);
+  const frag = document.createDocumentFragment();
+  products.forEach((p, idx) => frag.appendChild(productCard(p, idx)));
+  grid.appendChild(frag);
+}
+
+// Recommendations
+function renderRecommendations() {
+  const grid = document.getElementById('recommendations-grid');
+  const section = document.getElementById('recommendations');
+  if (!grid || !section) return;
+  
+  // Get products based on favorites or random
+  let recommended = [];
+  if (state.favorites.size > 0) {
+    const favCategories = Array.from(state.favorites).map(id => {
+      const p = state.products.find(pr => pr.id === id);
+      return p?.category;
+    }).filter(Boolean);
+    const mostFavCategory = favCategories.sort((a,b) => 
+      favCategories.filter(v => v===a).length - favCategories.filter(v => v===b).length
+    ).pop();
+    recommended = state.products.filter(p => 
+      p.category === mostFavCategory && !state.favorites.has(p.id)
+    ).slice(0, 8);
+  }
+  
+  if (recommended.length === 0) {
+    recommended = state.products.filter(p => p.tags?.includes('Mashhur') || Math.random() > 0.7).slice(0, 8);
+  }
+  
+  if (recommended.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  
+  section.style.display = 'block';
+  grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  recommended.forEach((p, idx) => frag.appendChild(productCard(p, idx)));
+  grid.appendChild(frag);
+}
+
+// Reviews and ratings
+function getProductRating(productId) {
+  const reviews = state.reviews.get(productId) || [];
+  if (reviews.length === 0) return 0;
+  const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
+  return sum / reviews.length;
+}
+
+function getReviewCount(productId) {
+  return (state.reviews.get(productId) || []).length;
+}
+
+function renderStars(rating) {
+  const full = Math.floor(rating);
+  const half = rating % 1 >= 0.5;
+  const empty = 5 - full - (half ? 1 : 0);
+  return '★'.repeat(full) + (half ? '☆' : '') + '☆'.repeat(empty);
+}
+
+function renderProductReviews(productId) {
+  const section = document.getElementById('reviews-section');
+  const list = document.getElementById('reviews-list');
+  if (!section || !list) return;
+  
+  const reviews = state.reviews.get(productId) || [];
+  if (reviews.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  
+  section.style.display = 'block';
+  list.innerHTML = reviews.slice(-5).reverse().map(r => `
+    <div class="review-item">
+      <div class="review-header">
+        <strong>${r.name}</strong>
+        <span class="review-stars">${renderStars(r.rating)}</span>
+        <span class="review-date">${new Date(r.date).toLocaleDateString('uz-UZ')}</span>
+      </div>
+      <p>${r.text}</p>
+    </div>
+  `).join('');
+  
+  const addReviewBtn = document.getElementById('add-review-btn');
+  if (addReviewBtn) {
+    addReviewBtn.onclick = () => openReviewModal(productId);
+  }
+}
+
+function openReviewModal(productId) {
+  const modal = document.getElementById('review-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  const form = document.getElementById('review-form');
+  if (!form) return;
+  
+  let selectedRating = 0;
+  const currentProductId = productId || (state.currentProduct && state.currentProduct.id);
+  
+  // Reset form
+  form.reset();
+  const stars = document.querySelectorAll('#star-rating .star');
+  stars.forEach(s => s.style.color = '#ccc');
+  
+  stars.forEach((star, idx) => {
+    star.onclick = () => {
+      selectedRating = idx + 1;
+      stars.forEach((s, i) => {
+        s.style.color = i < selectedRating ? '#ffc107' : '#ccc';
+        s.classList.toggle('active', i < selectedRating);
+      });
+    };
+  });
+  
+  // Remove old listeners and add new one
+  const newForm = form.cloneNode(true);
+  form.parentNode.replaceChild(newForm, form);
+  
+  document.getElementById('review-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = document.getElementById('review-name').value;
+    const text = document.getElementById('review-text').value;
+    if (!selectedRating || !name || !text) {
+      toast("Iltimos, barcha maydonlarni to'ldiring");
+      return;
+    }
+    
+    if (!state.reviews.has(currentProductId)) {
+      state.reviews.set(currentProductId, []);
+    }
+    state.reviews.get(currentProductId).push({
+      name,
+      rating: selectedRating,
+      text,
+      date: new Date().toISOString()
+    });
+    localStorage.setItem("reviews", JSON.stringify(Array.from(state.reviews.entries())));
+    toast("Sharh qo'shildi!");
+    closeReviewModal();
+    if (state.currentProduct) {
+      renderProductReviews(state.currentProduct.id);
+    }
+    renderProducts();
+  });
+}
+
+function closeReviewModal() {
+  const modal = document.getElementById('review-modal');
+  if (modal) modal.style.display = 'none';
+  const form = document.getElementById('review-form');
+  if (form) form.reset();
+  const stars = document.querySelectorAll('#star-rating .star');
+  stars.forEach(s => {
+    s.style.color = '#ccc';
+    s.classList.remove('active');
+  });
+}
+
+// Orders
+function renderOrders() {
+  const list = document.getElementById('orders-list');
+  const empty = document.getElementById('orders-empty');
+  if (!list) return;
+  
+  if (state.orders.length === 0) {
+    list.style.display = 'none';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  
+  list.style.display = 'block';
+  if (empty) empty.style.display = 'none';
+  list.innerHTML = state.orders.reverse().map(order => `
+    <div class="order-card">
+      <div class="order-header">
+        <div>
+          <strong>Buyurtma #${order.id}</strong>
+          <span class="order-date">${new Date(order.date).toLocaleDateString('uz-UZ')}</span>
+        </div>
+        <span class="order-status">${order.status}</span>
+      </div>
+      <div class="order-total">Jami: ${formatPrice(order.total)}</div>
+      <button class="btn" onclick="printOrder('${order.id}')">Chop etish</button>
+    </div>
+  `).join('');
+}
+
+function printOrder(orderId) {
+  const order = state.orders.find(o => o.id === orderId);
+  if (!order) return;
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <html>
+      <head><title>Buyurtma ${order.id}</title></head>
+      <body>
+        <h1>Buyurtma #${order.id}</h1>
+        <p>Sana: ${new Date(order.date).toLocaleString('uz-UZ')}</p>
+        <p>Holat: ${order.status}</p>
+        <p>Jami: ${formatPrice(order.total)}</p>
+        <p>© ${new Date().getFullYear()} Abdulhay Boutique</p>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.print();
+}
+
+// Share product
+function shareProduct(product) {
+  if (navigator.share) {
+    navigator.share({
+      title: product.name,
+      text: product.desc,
+      url: window.location.href + '#product=' + product.id
+    }).catch(() => {
+      copyProductLink(product);
+    });
+  } else {
+    copyProductLink(product);
+  }
+}
+
+function copyProductLink(product) {
+  const url = window.location.href + '#product=' + product.id;
+  navigator.clipboard.writeText(url).then(() => {
+    toast("Havola nusxalandi!");
+  });
+}
+
+// Color helper
+function getColorValue(color) {
+  const colors = {
+    'Qora': '#000000',
+    'Oq': '#ffffff',
+    "Ko'k": '#0066cc',
+    'Qizil': '#cc0000',
+    'Yashil': '#00cc00',
+    'Sariq': '#ffcc00'
+  };
+  return colors[color] || '#cccccc';
+}
+
+// Newsletter
+function closeNewsletterModal() {
+  const modal = document.getElementById('newsletter-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+}
+
+// Newsletter modal event listeners
+function initNewsletterModal() {
+  const modal = document.getElementById('newsletter-modal');
+  if (!modal) return;
+  
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'flex') {
+      closeNewsletterModal();
+    }
+  });
+  
+  // Close on backdrop click (already handled in HTML)
+}
+
+// Price range filter
+function attachPriceFilter() {
+  const range = document.getElementById('price-range');
+  const minEl = document.getElementById('price-min');
+  const maxEl = document.getElementById('price-max');
+  if (!range || !minEl || !maxEl) return;
+  
+  range.addEventListener('input', (e) => {
+    state.filters.priceMax = parseInt(e.target.value);
+    maxEl.textContent = state.filters.priceMax.toLocaleString('uz-UZ');
+    state.page.shown = state.page.size;
+    renderProducts();
+  });
 }
 
 
