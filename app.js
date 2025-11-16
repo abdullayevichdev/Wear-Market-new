@@ -29,10 +29,10 @@ const state = {
   reviews: new Map(JSON.parse(localStorage.getItem("reviews") || "[]")), // productId -> [{name, rating, text, date}]
   orders: JSON.parse(localStorage.getItem("orders") || "[]"),
   newsletter: JSON.parse(localStorage.getItem("newsletter") || "[]"),
-  filters: { q: "", category: "all", sort: "default", priceMax: 500000 },
+  filters: { q: "", category: "all", sort: "default", priceMax: 500000, view: "grid" },
   promo: null,
   shipping: { method: "standard" },
-  page: { size: 12, shown: 12 },
+  page: { size: parseInt(localStorage.getItem('productsPerPage')) || 12, shown: parseInt(localStorage.getItem('productsPerPage')) || 12 },
   galleryRendered: false,
   currentProduct: null,
   selectedVariants: {} // {productId: {size: 'M', color: 'Qizil'}}
@@ -43,6 +43,10 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const formatPrice = v => `${v.toLocaleString("uz-UZ")} so'm`;
 const toast = (msg) => {
+  // Check if notifications are enabled
+  const notificationsEnabled = localStorage.getItem('notifications') !== 'false';
+  if (!notificationsEnabled) return;
+  
   const el = document.querySelector('#toast');
   if (!el) return;
   el.textContent = msg;
@@ -290,6 +294,18 @@ function renderProducts() {
     case "newest": items.sort((a,b)=>new Date(b.createdAt || 0)-new Date(a.createdAt || 0)); break;
   }
   
+  // Update products count
+  const countEl = document.getElementById('products-count');
+  if (countEl) countEl.textContent = items.length;
+  
+  // Apply view mode
+  const viewMode = state.filters.view || 'grid';
+  if (viewMode === 'list') {
+    grid.classList.add('grid--list');
+  } else {
+    grid.classList.remove('grid--list');
+  }
+  
   const limit = state.page.shown;
   const visible = items.slice(0, limit);
   const frag = document.createDocumentFragment();
@@ -309,6 +325,7 @@ function renderProducts() {
   // Show message if no products found
   if (items.length === 0) {
     grid.innerHTML = '<div class="card" style="padding:40px; text-align:center; color:var(--muted);">Mahsulotlar topilmadi. Filtrlarni o\'zgartiring.</div>';
+    if (countEl) countEl.textContent = '0';
   }
 }
 
@@ -499,6 +516,128 @@ function persistCart() {
   localStorage.setItem("cart", JSON.stringify(Array.from(state.cart.entries())));
 }
 
+// Export cart to PDF
+function exportCartToPDF() {
+  if (state.cart.size === 0) {
+    toast("Savat bo'sh");
+    return;
+  }
+  
+  let content = `
+    <h1>Savat ro'yxati</h1>
+    <p>Sana: ${new Date().toLocaleString('uz-UZ')}</p>
+    <table border="1" cellpadding="5" style="width:100%; border-collapse:collapse;">
+      <tr>
+        <th>Mahsulot</th>
+        <th>O'lcham</th>
+        <th>Rang</th>
+        <th>Miqdor</th>
+        <th>Narx</th>
+        <th>Jami</th>
+      </tr>
+  `;
+  
+  state.cart.forEach(({ product, qty, size, color }) => {
+    const total = product.price * qty;
+    content += `
+      <tr>
+        <td>${product.name}</td>
+        <td>${size || 'N/A'}</td>
+        <td>${color || 'N/A'}</td>
+        <td>${qty}</td>
+        <td>${formatPrice(product.price)}</td>
+        <td>${formatPrice(total)}</td>
+      </tr>
+    `;
+  });
+  
+  const subtotal = cartTotal();
+  const { shipping, discount } = computeShippingAndDiscount(subtotal);
+  const total = Math.max(0, subtotal + shipping - discount);
+  
+  content += `
+      <tr>
+        <td colspan="5" style="text-align:right;"><strong>Jami:</strong></td>
+        <td><strong>${formatPrice(total)}</strong></td>
+      </tr>
+    </table>
+    <p style="margin-top:20px;">© ${new Date().getFullYear()} Abdulhay Boutique</p>
+  `;
+  
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Savat ro'yxati</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          table { margin: 20px 0; }
+          th { background: #f0f0f0; }
+        </style>
+      </head>
+      <body>${content}</body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.print();
+  toast("PDF tayyorlandi");
+}
+
+// Share cart
+function shareCart() {
+  if (state.cart.size === 0) {
+    toast("Savat bo'sh");
+    return;
+  }
+  
+  const items = Array.from(state.cart.values()).map(({ product, qty }) => 
+    `${product.name} (${qty} ta)`
+  ).join(', ');
+  
+  const text = `Mening savatim: ${items}`;
+  const url = window.location.href;
+  
+  if (navigator.share) {
+    navigator.share({
+      title: 'Mening savatim',
+      text: text,
+      url: url
+    }).catch(() => {
+      copyToClipboard(text + '\n' + url);
+    });
+  } else {
+    copyToClipboard(text + '\n' + url);
+  }
+}
+
+// Copy to clipboard
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    toast("Nusxalandi!");
+  }).catch(() => {
+    toast("Nusxalashda xatolik");
+  });
+}
+
+// Clear cart
+function clearCart() {
+  if (state.cart.size === 0) {
+    toast("Savat allaqachon bo'sh");
+    return;
+  }
+  
+  if (confirm("Haqiqatan ham savatni tozalashni xohlaysizmi?")) {
+    state.cart.clear();
+    persistCart();
+    renderCart();
+    updateCartCount();
+    if (document.querySelector('.view--active[data-view="catalog"]')) {
+      renderProducts();
+    }
+    toast("Savat tozalandi");
+  }
+}
+
 function cartTotal() {
   let t = 0;
   state.cart.forEach(({ product, qty }) => t += product.price * qty);
@@ -632,6 +771,29 @@ function attachFilters() {
     state.page.shown = state.page.size;
     renderProducts();
   });
+  
+  // View toggle (grid/list)
+  const viewToggleBtns = document.querySelectorAll('.view-toggle-btn');
+  viewToggleBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      viewToggleBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.filters.view = btn.dataset.view;
+      localStorage.setItem('viewMode', state.filters.view);
+      renderProducts();
+    });
+  });
+  
+  // Load saved view mode
+  const savedView = localStorage.getItem('viewMode') || 'grid';
+  state.filters.view = savedView;
+  viewToggleBtns.forEach(btn => {
+    if (btn.dataset.view === savedView) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
 }
 
 // Navigation
@@ -742,6 +904,24 @@ function init() {
   const savedTheme = localStorage.getItem('theme') || 'light';
   applyTheme(savedTheme);
   
+  // Set font size
+  const savedFontSize = localStorage.getItem('fontSize') || 'medium';
+  if (window.Settings && window.Settings.setFontSize) {
+    window.Settings.setFontSize(savedFontSize);
+  } else {
+    document.documentElement.setAttribute('data-font-size', savedFontSize);
+  }
+  
+  // Set animations
+  const animationsEnabled = localStorage.getItem('animations') !== 'false';
+  if (window.Settings && window.Settings.applyAnimations) {
+    window.Settings.applyAnimations(animationsEnabled);
+  } else {
+    if (!animationsEnabled) {
+      document.documentElement.setAttribute('data-no-animations', 'true');
+    }
+  }
+  
   // Initialize settings
   if (window.Settings && typeof window.Settings.initSettings === 'function') {
     window.Settings.initSettings();
@@ -762,6 +942,21 @@ function init() {
   attachPhotoUploader();
   attachFilters();
   attachPriceFilter();
+  
+  // Cart actions
+  const exportPdfBtn = document.getElementById('export-cart-pdf');
+  const shareCartBtn = document.getElementById('share-cart');
+  const clearCartBtn = document.getElementById('clear-cart');
+  
+  if (exportPdfBtn) {
+    exportPdfBtn.addEventListener('click', exportCartToPDF);
+  }
+  if (shareCartBtn) {
+    shareCartBtn.addEventListener('click', shareCart);
+  }
+  if (clearCartBtn) {
+    clearCartBtn.addEventListener('click', clearCart);
+  }
   
   // Initialize reviews from localStorage
   if (localStorage.getItem('reviews')) {

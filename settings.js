@@ -26,7 +26,21 @@ const translations = {
     
     // Other text
     loading: 'Yuklanmoqda...',
-    close: 'Yopish'
+    close: 'Yopish',
+    
+    // New settings
+    fontSize: 'Font o\'lchami',
+    productsPerPage: 'Mahsulotlar sahifada',
+    animations: 'Animatsiyalar',
+    showAnimations: 'Animatsiyalarni ko\'rsatish',
+    notifications: 'Xabarnomalar',
+    showNotifications: 'Xabarnomalarni ko\'rsatish',
+    dataManagement: 'Ma\'lumotlarni boshqarish',
+    clearCache: 'Cache tozalash',
+    clearAllData: 'Barcha ma\'lumotlarni tozalash',
+    cacheCleared: 'Cache tozalandi',
+    allDataCleared: 'Barcha ma\'lumotlar tozalandi',
+    confirmClear: 'Haqiqatan ham barcha ma\'lumotlarni o\'chirmoqchimisiz?'
   },
   en: {
     // Navigation
@@ -54,7 +68,21 @@ const translations = {
     
     // Other text
     loading: 'Loading...',
-    close: 'Close'
+    close: 'Close',
+    
+    // New settings
+    fontSize: 'Font Size',
+    productsPerPage: 'Products Per Page',
+    animations: 'Animations',
+    showAnimations: 'Show Animations',
+    notifications: 'Notifications',
+    showNotifications: 'Show Notifications',
+    dataManagement: 'Data Management',
+    clearCache: 'Clear Cache',
+    clearAllData: 'Clear All Data',
+    cacheCleared: 'Cache cleared',
+    allDataCleared: 'All data cleared',
+    confirmClear: 'Are you sure you want to clear all data?'
   }
 };
 
@@ -90,6 +118,9 @@ function initSettings() {
   
   // Initialize event listeners
   initializeEventListeners();
+  
+  // Initialize additional settings
+  initAdditionalSettings();
 }
 
 // Initialize event listeners
@@ -407,9 +438,120 @@ if (document.readyState === 'loading') {
   initializeSettings();
 }
 
+// Initialize additional settings
+function initAdditionalSettings() {
+  // Font size
+  const fontSizeOptions = document.querySelectorAll('.font-size-option');
+  const savedFontSize = localStorage.getItem('fontSize') || 'medium';
+  setFontSize(savedFontSize);
+  
+  fontSizeOptions.forEach(option => {
+    if (option.dataset.size === savedFontSize) {
+      option.classList.add('active');
+    }
+    option.addEventListener('click', () => {
+      fontSizeOptions.forEach(opt => opt.classList.remove('active'));
+      option.classList.add('active');
+      setFontSize(option.dataset.size);
+    });
+  });
+  
+  // Products per page
+  const productsPerPage = document.getElementById('products-per-page');
+  if (productsPerPage) {
+    const saved = localStorage.getItem('productsPerPage') || '12';
+    productsPerPage.value = saved;
+    if (window.state) {
+      window.state.page.size = parseInt(saved);
+    }
+    productsPerPage.addEventListener('change', (e) => {
+      localStorage.setItem('productsPerPage', e.target.value);
+      if (window.state) {
+        window.state.page.size = parseInt(e.target.value);
+        window.state.page.shown = parseInt(e.target.value);
+        if (window.renderProducts) {
+          window.renderProducts();
+        }
+      }
+    });
+  }
+  
+  // Animations toggle
+  const animationsToggle = document.getElementById('animations-toggle');
+  if (animationsToggle) {
+    const saved = localStorage.getItem('animations') !== 'false';
+    animationsToggle.checked = saved;
+    applyAnimations(saved);
+    animationsToggle.addEventListener('change', (e) => {
+      localStorage.setItem('animations', e.target.checked);
+      applyAnimations(e.target.checked);
+    });
+  }
+  
+  // Notifications toggle
+  const notificationsToggle = document.getElementById('notifications-toggle');
+  if (notificationsToggle) {
+    const saved = localStorage.getItem('notifications') !== 'false';
+    notificationsToggle.checked = saved;
+    notificationsToggle.addEventListener('change', (e) => {
+      localStorage.setItem('notifications', e.target.checked);
+    });
+  }
+  
+  // Clear cache button
+  const clearCacheBtn = document.getElementById('clear-cache-btn');
+  if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', () => {
+      // Clear only cache, keep user data
+      if (confirm('Cache tozalansinmi? (Savat, sevimlilar va boshqa ma\'lumotlar saqlanadi)')) {
+        // Clear only non-essential data
+        localStorage.removeItem('newsletterShown');
+        localStorage.removeItem('recentlyViewed');
+        if (window.toast) {
+          window.toast('Cache tozalandi');
+        }
+        location.reload();
+      }
+    });
+  }
+  
+  // Clear all data button
+  const clearDataBtn = document.getElementById('clear-data-btn');
+  if (clearDataBtn) {
+    clearDataBtn.addEventListener('click', () => {
+      const confirmText = translations[currentLang]?.confirmClear || 'Haqiqatan ham barcha ma\'lumotlarni o\'chirmoqchimisiz?';
+      if (confirm(confirmText)) {
+        localStorage.clear();
+        if (window.toast) {
+          const msg = translations[currentLang]?.allDataCleared || 'Barcha ma\'lumotlar tozalandi';
+          window.toast(msg);
+        }
+        setTimeout(() => {
+          location.reload();
+        }, 1000);
+      }
+    });
+  }
+}
+
+function setFontSize(size) {
+  localStorage.setItem('fontSize', size);
+  document.documentElement.setAttribute('data-font-size', size);
+}
+
+function applyAnimations(enabled) {
+  if (enabled) {
+    document.documentElement.removeAttribute('data-no-animations');
+  } else {
+    document.documentElement.setAttribute('data-no-animations', 'true');
+  }
+}
+
 // Export functions for use in other files
 window.Settings = {
   setLanguage,
   getCurrentLanguage: () => currentLang,
-  translate: (key) => translations[currentLang][key] || key
+  translate: (key) => translations[currentLang][key] || key,
+  setFontSize,
+  applyAnimations
 };

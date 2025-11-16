@@ -62,6 +62,10 @@
                     <div class="search">
                         <input id="search-input" type="search" placeholder="Mahsulot qidirish... (masalan: svitra, kastyum)" aria-label="Qidirish">
                     </div>
+                    <div class="view-toggle">
+                        <button class="view-toggle-btn active" data-view="grid" title="Grid ko'rinishi">⊞</button>
+                        <button class="view-toggle-btn" data-view="list" title="List ko'rinishi">☰</button>
+                    </div>
                     <div class="filters">
                         <select id="category-filter" aria-label="Kategoriya">
                             <option value="all">Barcha kategoriyalar</option>
@@ -91,6 +95,9 @@
                 <div id="product-grid" class="grid" aria-live="polite"></div>
                 <div style="display:flex; justify-content:center; margin:12px 0 0;">
                     <button id="load-more" class="btn" style="display:none;">Yana yuklash</button>
+                </div>
+                <div class="products-stats" style="text-align:center; margin-top:20px; color:var(--muted);">
+                    <span id="products-count">0</span> ta mahsulot topildi
                 </div>
             </div>
         </section>
@@ -165,6 +172,11 @@
                     <div id="cart-products-section">
                         <h3 class="section-subtitle">Savatdagi mahsulotlar</h3>
                         <div id="cart-list" class="cart-list"></div>
+                        <div class="cart-actions" style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
+                            <button class="btn" id="export-cart-pdf">PDF yuklab olish</button>
+                            <button class="btn" id="share-cart">Savatni ulashish</button>
+                            <button class="btn btn--danger" id="clear-cart">Savatni tozalash</button>
+                        </div>
                     </div>
                 </div>
                 <aside class="checkout" id="checkout">
@@ -261,6 +273,46 @@
                             <span>🌙</span>
                             <span id="dark-theme-text" data-i18n="darkTheme">Tungi</span>
                         </button>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <h3>Font o'lchami</h3>
+                    <div class="font-size-selector">
+                        <button class="font-size-option" data-size="small">Aa</button>
+                        <button class="font-size-option active" data-size="medium">Aa</button>
+                        <button class="font-size-option" data-size="large">Aa</button>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <h3>Mahsulotlar sahifada</h3>
+                    <select id="products-per-page" class="setting-select">
+                        <option value="12">12 ta</option>
+                        <option value="24">24 ta</option>
+                        <option value="36">36 ta</option>
+                        <option value="48">48 ta</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <h3>Animatsiyalar</h3>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="animations-toggle" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Animatsiyalarni ko'rsatish</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <h3>Xabarnomalar</h3>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="notifications-toggle" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Xabarnomalarni ko'rsatish</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <h3>Ma'lumotlarni boshqarish</h3>
+                    <div class="data-management">
+                        <button class="btn btn--danger" id="clear-cache-btn">Cache tozalash</button>
+                        <button class="btn btn--danger" id="clear-data-btn">Barcha ma'lumotlarni tozalash</button>
                     </div>
                 </div>
             </div>
