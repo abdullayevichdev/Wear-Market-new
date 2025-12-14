@@ -428,6 +428,67 @@
 
     <script src="settings.js"></script>
     <script src="app.js"></script>
+
+     <!-- shu yerdan -->
+     <script>
+// Bot webhook URL va secret (o'zgartirmang, agar Render URL o'zgarmagan bo'lsa)
+const BOT_WEBHOOK_URL = 'https://admin-bot-jtj9.onrender.com/webhook/selected-product';
+const WEBHOOK_SECRET = 'super_secret_999';
+
+// "Savatga solish" tugmasi bosilganda botga xabar yuborish
+document.addEventListener('click', function(e) {
+  const addToCartBtn = e.target.closest('.add-cart');
+  if (!addToCartBtn) return;
+
+  // Mahsulot kartasini topamiz
+  const card = addToCartBtn.closest('.card');
+  if (!card) return;
+
+  const productName = card.querySelector('.card__title')?.textContent.trim() || 'Noma\'lum mahsulot';
+  const price = card.querySelector('.price')?.textContent.trim() || 'Narxi ko\'rsatilmagan';
+  const imageUrl = card.querySelector('img')?.src || '';
+
+  // Foydalanuvchi ma'lumotlari (checkoutdan keyin saqlanadi)
+  const userName = localStorage.getItem('checkoutName') || 'Noma\'lum';
+  const userPhone = localStorage.getItem('checkoutPhone') || 'Noma\'lum';
+
+  const data = {
+    productName,
+    price,
+    imageUrl,
+    userName,
+    userPhone,
+    timestamp: new Date().toLocaleString('uz-UZ')
+  };
+
+  // Botga yuborish
+  fetch(BOT_WEBHOOK_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Secret': WEBHOOK_SECRET
+    },
+    body: JSON.stringify(data)
+  })
+  .then(res => console.log('Botga yuborildi:', res.ok ? 'Muvaffaqiyatli' : 'Xato'))
+  .catch(err => console.error('Xato:', err));
+});
+
+// Checkout formadan ism va telefonni saqlash
+const checkoutForm = document.getElementById('checkout-form');
+if (checkoutForm) {
+  checkoutForm.addEventListener('submit', function(e) {
+    const formData = new FormData(checkoutForm);
+    const ism = formData.get('ism') || '';
+    const familya = formData.get('familya') || '';
+    const telefon = formData.get('telefon') || '';
+
+    const fullName = `${ism} ${familya}`.trim();
+    if (fullName) localStorage.setItem('checkoutName', fullName);
+    if (telefon) localStorage.setItem('checkoutPhone', telefon);
+  });
+}
+</script>
 </body>
 </html>
 
