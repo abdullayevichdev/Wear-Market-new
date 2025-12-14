@@ -435,27 +435,27 @@
 const BOT_WEBHOOK_URL = 'https://admin-bot-jtj9.onrender.com/webhook/selected-product';
 const WEBHOOK_SECRET = 'super_secret_999';
 
-// "Savatga solish" tugmasi bosilganda botga xabar yuborish
-document.addEventListener('click', function(e) {
-  const addToCartBtn = e.target.closest('.add-cart');
-  if (!addToCartBtn) return;
+// app.js dagi addToCart funksiyasidan keyin botga xabar yuborish
+// Bu funksiyani global qilib, asosiy kodga ulaymiz
+const originalAddToCart = window.addToCart || function() {};
 
-  const card = addToCartBtn.closest('.card');
-  if (!card) return;
+window.addToCart = function(id, size, color) {
+  // Avval asl funksiyani chaqiramiz (savatga qo'shish ishlasin)
+  originalAddToCart(id, size, color);
 
-  const productName = card.querySelector('.card__title')?.textContent.trim() || 'Noma\'lum mahsulot';
-  const price = card.querySelector('.price')?.textContent.trim() || 'Narxi ko\'rsatilmagan';
-  const imageUrl = card.querySelector('img')?.src || '';
+  // Endi mahsulot ma'lumotlarini topamiz
+  const product = window.state.products.find(p => p.id === id);
+  if (!product) return;
 
   const userName = localStorage.getItem('checkoutName') || 'Noma\'lum';
   const userPhone = localStorage.getItem('checkoutPhone') || 'Noma\'lum';
 
   const data = {
-    productName,
-    price,
-    imageUrl,
-    userName,
-    userPhone,
+    productName: product.name,
+    price: window.formatPrice(product.price),
+    imageUrl: product.img,
+    userName: userName,
+    userPhone: userPhone,
     timestamp: new Date().toLocaleString('uz-UZ')
   };
 
@@ -469,37 +469,14 @@ document.addEventListener('click', function(e) {
   })
   .then(res => {
     if (res.ok) {
-      console.log('Botga muvaffaqiyatli yuborildi!');
-      alert('Mahsulot tanlandi va sizga xabar yuborildi! ✅');  // Test uchun alert qo'shdim
+      console.log('✅ Botga muvaffaqiyatli yuborildi:', data.productName);
+      // Ixtiyoriy: toast yoki alert
     } else {
-      console.error('Xato status:', res.status);
-      alert('Xabar yuborishda xato yuz berdi (status: ' + res.status + ')');
+      console.error('❌ Botga yuborishda xato:', res.status);
     }
   })
-  .catch(err => {
-    console.error('Fetch xatosi:', err);
-    alert('Internet yoki server xatosi!');
-  });
-});
-
-// Checkout formani to'g'ri ushlash (submitni to'xtatmasdan oldin saqlaymiz)
-const checkoutForm = document.getElementById('checkout-form');
-if (checkoutForm) {
-  checkoutForm.addEventListener('submit', function(e) {
-    // Ma'lumotlarni saqlash (forma submit bo'lishidan oldin)
-    const formData = new FormData(checkoutForm);
-    const ism = formData.get('ism') || '';
-    const familya = formData.get('familya') || '';
-    const telefon = formData.get('telefon') || '';
-
-    const fullName = `${ism} ${familya}`.trim();
-    if (fullName) localStorage.setItem('checkoutName', fullName);
-    if (telefon) localStorage.setItem('checkoutPhone', telefon);
-
-    console.log('Checkout ma\'lumotlari saqlandi:', fullName, telefon);
-    // e.preventDefault() qo'shmaymiz – forma normal submit bo'lsin
-  });
-}
+  .catch(err => console.error('Fetch xatosi:', err));
+};
 </script>
 </body>
 </html>
