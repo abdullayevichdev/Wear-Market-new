@@ -1636,55 +1636,5 @@ function attachPriceFilter() {
     renderProducts();
   });
 }
-// yangilangan qism shu yerdan
-<script>
-// Bot webhook URL (Render deploydan keyin olingan URL)
-const BOT_WEBHOOK_URL = 'https://admin-bot-jtj9.onrender.com'; // O'ZGARTIRING!!!
-const WEBHOOK_SECRET = 'super_secret_999'; // .env dagi bilan bir xil!!!
-
-// Barcha "Tanlash" tugmalarini topamiz
-document.querySelectorAll('.product-card .add-to-selected').forEach(button => {
-  button.addEventListener('click', function(e) {
-    e.preventDefault();
-
-    // Mahsulot kartasini topamiz
-    const card = this.closest('.product-card');
-    const productName = card.querySelector('h3').textContent.trim();
-    const price = card.querySelector('.price').textContent.trim();
-    const imageUrl = card.querySelector('img').src;
-
-    // Foydalanuvchi haqida ma'lumot (agar forma to'ldirgan bo'lsa, keyinroq qo'shamiz)
-    const userName = localStorage.getItem('userName') || 'Noma\'lum';
-    const userPhone = localStorage.getItem('userPhone') || 'Noma\'lum';
-
-    const data = {
-      productName,
-      price,
-      imageUrl,
-      userName,
-      userPhone,
-      timestamp: new Date().toLocaleString('uz-UZ')
-    };
-
-    // Botga yuborish
-    fetch(BOT_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Secret': WEBHOOK_SECRET
-      },
-      body: JSON.stringify(data)
-    })
-    .then(res => {
-      if (res.ok) {
-        alert('Mahsulot tanlandi! ✅');
-      } else {
-        alert('Xatolik yuz berdi.');
-      }
-    })
-    .catch(err => console.error(err));
-  });
-});
-</script>
 
 
