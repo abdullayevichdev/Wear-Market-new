@@ -430,8 +430,8 @@
     <script src="app.js"></script>
 
      <!-- shu yerdan -->
-     <script>
-// Bot webhook URL va secret (o'zgartirmang, agar Render URL o'zgarmagan bo'lsa)
+<script>
+// Bot webhook URL va secret
 const BOT_WEBHOOK_URL = 'https://admin-bot-jtj9.onrender.com/webhook/selected-product';
 const WEBHOOK_SECRET = 'super_secret_999';
 
@@ -440,7 +440,6 @@ document.addEventListener('click', function(e) {
   const addToCartBtn = e.target.closest('.add-cart');
   if (!addToCartBtn) return;
 
-  // Mahsulot kartasini topamiz
   const card = addToCartBtn.closest('.card');
   if (!card) return;
 
@@ -448,7 +447,6 @@ document.addEventListener('click', function(e) {
   const price = card.querySelector('.price')?.textContent.trim() || 'Narxi ko\'rsatilmagan';
   const imageUrl = card.querySelector('img')?.src || '';
 
-  // Foydalanuvchi ma'lumotlari (checkoutdan keyin saqlanadi)
   const userName = localStorage.getItem('checkoutName') || 'Noma\'lum';
   const userPhone = localStorage.getItem('checkoutPhone') || 'Noma\'lum';
 
@@ -461,7 +459,6 @@ document.addEventListener('click', function(e) {
     timestamp: new Date().toLocaleString('uz-UZ')
   };
 
-  // Botga yuborish
   fetch(BOT_WEBHOOK_URL, {
     method: 'POST',
     headers: {
@@ -470,14 +467,26 @@ document.addEventListener('click', function(e) {
     },
     body: JSON.stringify(data)
   })
-  .then(res => console.log('Botga yuborildi:', res.ok ? 'Muvaffaqiyatli' : 'Xato'))
-  .catch(err => console.error('Xato:', err));
+  .then(res => {
+    if (res.ok) {
+      console.log('Botga muvaffaqiyatli yuborildi!');
+      alert('Mahsulot tanlandi va sizga xabar yuborildi! ✅');  // Test uchun alert qo'shdim
+    } else {
+      console.error('Xato status:', res.status);
+      alert('Xabar yuborishda xato yuz berdi (status: ' + res.status + ')');
+    }
+  })
+  .catch(err => {
+    console.error('Fetch xatosi:', err);
+    alert('Internet yoki server xatosi!');
+  });
 });
 
-// Checkout formadan ism va telefonni saqlash
+// Checkout formani to'g'ri ushlash (submitni to'xtatmasdan oldin saqlaymiz)
 const checkoutForm = document.getElementById('checkout-form');
 if (checkoutForm) {
   checkoutForm.addEventListener('submit', function(e) {
+    // Ma'lumotlarni saqlash (forma submit bo'lishidan oldin)
     const formData = new FormData(checkoutForm);
     const ism = formData.get('ism') || '';
     const familya = formData.get('familya') || '';
@@ -486,6 +495,9 @@ if (checkoutForm) {
     const fullName = `${ism} ${familya}`.trim();
     if (fullName) localStorage.setItem('checkoutName', fullName);
     if (telefon) localStorage.setItem('checkoutPhone', telefon);
+
+    console.log('Checkout ma\'lumotlari saqlandi:', fullName, telefon);
+    // e.preventDefault() qo'shmaymiz – forma normal submit bo'lsin
   });
 }
 </script>
