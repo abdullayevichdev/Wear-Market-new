@@ -1639,7 +1639,7 @@ function attachPriceFilter() {
 // yangilangan qism shu yerdan
 <script>
 // Bot webhook URL (Render deploydan keyin olingan URL)
-const BOT_WEBHOOK_URL = 'https://kiyim-bot.onrender.com/webhook/selected-product'; // O'ZGARTIRING!!!
+const BOT_WEBHOOK_URL = 'https://admin-bot-jtj9.onrender.com'; // O'ZGARTIRING!!!
 const WEBHOOK_SECRET = 'super_secret_999'; // .env dagi bilan bir xil!!!
 
 // Barcha "Tanlash" tugmalarini topamiz
